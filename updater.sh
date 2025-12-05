@@ -158,17 +158,6 @@ if version_greater "$REPO_VERSION" "$CURRENT_VERSION"; then
     
     log_message "Starting update process..."
     
-    # Stop Node-RED service
-    log_message "Stopping Node-RED service..."
-    sudo systemctl stop nodered
-    
-    if [ $? -ne 0 ]; then
-        log_message "ERROR: Failed to stop Node-RED service"
-        exit 1
-    fi
-    
-    sleep 2
-    
     # Backup current .node-red directory
     log_message "Backing up current .node-red directory..."
     BACKUP_DIR="$TARGET_DIR/.node-red.backup.$(date +%Y%m%d_%H%M%S)"
@@ -184,7 +173,6 @@ if version_greater "$REPO_VERSION" "$CURRENT_VERSION"; then
     mkdir -p "$TEMP_DIR"
     cd "$TEMP_DIR" || {
         log_message "ERROR: Could not create temp directory"
-        sudo systemctl start nodered
         exit 1
     }
     
@@ -194,14 +182,12 @@ if version_greater "$REPO_VERSION" "$CURRENT_VERSION"; then
     
     if [ $? -ne 0 ]; then
         log_message "ERROR: Failed to clone repository"
-        sudo systemctl start nodered
         exit 1
     fi
     
     # Check if .node-red exists in the cloned repo
     if [ ! -d "$TEMP_DIR/repo/.node-red" ]; then
         log_message "ERROR: .node-red directory not found in repository"
-        sudo systemctl start nodered
         exit 1
     fi
     
@@ -222,7 +208,6 @@ if version_greater "$REPO_VERSION" "$CURRENT_VERSION"; then
     
     if [ $? -ne 0 ]; then
         log_message "ERROR: Failed to move .node-red directory"
-        sudo systemctl start nodered
         exit 1
     fi
     
@@ -246,55 +231,30 @@ if version_greater "$REPO_VERSION" "$CURRENT_VERSION"; then
     log_message "Updating database version to $REPO_VERSION..."
     
     # Log current database state for debugging
-    CURRENT_DB_STATE=$(sqlite3 "$DB_PATH" "SELECT key, value, version FROM settings;" 2>&1)
+    CURRENT_DB_STATE=$(sqlite3 "$DB_PATH" "SELECT * FROM settings;" 2>&1)
     log_message "Current database state: $CURRENT_DB_STATE"
     
     # Update both value and version columns where key='system_version'
-    ROWS_AFFECTED=$(sqlite3 "$DB_PATH" "UPDATE settings SET value = 'SEER Version $REPO_VERSION', version = $REPO_VERSION WHERE key='system_version'; SELECT changes();" 2>&1 | tail -n 1)
-    log_message "Rows affected by version update: $ROWS_AFFECTED"
+    sqlite3 "$DB_PATH" "UPDATE settings SET value = '$REPO_VERSION', version = '$REPO_VERSION' WHERE key='system_version';" 2>&1 >> "$LOG_FILE"
     
-    # If no rows were affected, something is wrong
-    if [ "$ROWS_AFFECTED" = "0" ] || [ -z "$ROWS_AFFECTED" ]; then
-        log_message "ERROR: Failed to update database version (no rows affected). Check if key='system_version' exists."
-        sudo systemctl start nodered
+    if [ $? -ne 0 ]; then
+        log_message "ERROR: Failed to execute database update"
         exit 1
     fi
     
     # Verify the update
     NEW_VERSION=$(sqlite3 "$DB_PATH" "SELECT version FROM settings WHERE key='system_version' LIMIT 1;" 2>/dev/null)
-    if [ -z "$NEW_VERSION" ]; then
-        NEW_VERSION=$(sqlite3 "$DB_PATH" "SELECT version FROM settings LIMIT 1;" 2>/dev/null)
-    fi
     
     # Verify the version matches what we tried to set
     if [ "$NEW_VERSION" != "$REPO_VERSION" ]; then
         log_message "ERROR: Database version mismatch. Expected: $REPO_VERSION, Got: $NEW_VERSION"
-        sudo systemctl start nodered
         exit 1
     fi
     
     log_message "Database version updated to: $NEW_VERSION"
-    
-    # Start Node-RED service
-    log_message "Starting Node-RED service..."
-    sudo systemctl start nodered
-    
-    if [ $? -eq 0 ]; then
-        log_message "Node-RED service started successfully"
-    else
-        log_message "ERROR: Failed to start Node-RED service"
-        exit 1
-    fi
-    
     log_message "Update completed successfully to version $REPO_VERSION"
 else
     log_message "System is up to date (version: $CURRENT_VERSION)"
-    
-    # Check if Node-RED is running, if not start it
-    if ! systemctl is-active --quiet nodered; then
-        log_message "Node-RED is not running, starting service..."
-        sudo systemctl start nodered
-    fi
 fi
 
 # ============================================
@@ -307,10 +267,12 @@ ROUTER_CURRENT_VERSION=$(sqlite3 "$DB_PATH" "SELECT router_version FROM settings
 if [ -n "$ROUTER_CURRENT_VERSION" ]; then
     log_message "Current Router version: $ROUTER_CURRENT_VERSION"
     
-    # Fetch Router version from GitHub
-    ROUTER_REPO_VERSION=$(curl -s -H "Cache-Control: no-cache" "https://raw.githubusercontent.com/lyncsolutionsph/router0/main/version.txt?$(date +%s)" | tr -d '[:space:]')
+    # Fetch Router version from GitHub with HTTP status check
+    ROUTER_RESPONSE=$(curl -s -w "\n%{http_code}" -H "Cache-Control: no-cache" "https://raw.githubusercontent.com/lyncsolutionsph/router/main/version.txt?$(date +%s)" 2>/dev/null)
+    ROUTER_HTTP_CODE=$(echo "$ROUTER_RESPONSE" | tail -n 1)
+    ROUTER_REPO_VERSION=$(echo "$ROUTER_RESPONSE" | head -n -1 | tr -d '[:space:]')
     
-    if [ -n "$ROUTER_REPO_VERSION" ]; then
+    if [ -n "$ROUTER_REPO_VERSION" ] && [ "$ROUTER_HTTP_CODE" = "200" ]; then
         log_message "Repository Router version: $ROUTER_REPO_VERSION"
         
         if version_greater "$ROUTER_REPO_VERSION" "$ROUTER_CURRENT_VERSION"; then
@@ -325,7 +287,7 @@ if [ -n "$ROUTER_CURRENT_VERSION" ]; then
                 
                 if [ $? -eq 0 ]; then
                     # Update database with new router version in the router_version column
-                    sqlite3 "$DB_PATH" "UPDATE settings SET router_version = $ROUTER_REPO_VERSION WHERE key='system_version';" 2>&1 >> "$LOG_FILE"
+                    sqlite3 "$DB_PATH" "UPDATE settings SET router_version = '$ROUTER_REPO_VERSION' WHERE key='system_version';" 2>&1 >> "$LOG_FILE"
                     log_message "Router Service updated successfully to version $ROUTER_REPO_VERSION"
                 else
                     log_message "WARNING: Router Service installation failed"
@@ -353,10 +315,12 @@ FIREWALL_CURRENT_VERSION=$(sqlite3 "$DB_PATH" "SELECT firewall_version FROM sett
 if [ -n "$FIREWALL_CURRENT_VERSION" ]; then
     log_message "Current Firewall version: $FIREWALL_CURRENT_VERSION"
     
-    # Fetch Firewall version from GitHub
-    FIREWALL_REPO_VERSION=$(curl -s -H "Cache-Control: no-cache" "https://raw.githubusercontent.com/lyncsolutionsph/firewall/main/version.txt?$(date +%s)" | tr -d '[:space:]')
+    # Fetch Firewall version from GitHub with HTTP status check
+    FIREWALL_RESPONSE=$(curl -s -w "\n%{http_code}" -H "Cache-Control: no-cache" "https://raw.githubusercontent.com/lyncsolutionsph/firewall/main/version.txt?$(date +%s)" 2>/dev/null)
+    FIREWALL_HTTP_CODE=$(echo "$FIREWALL_RESPONSE" | tail -n 1)
+    FIREWALL_REPO_VERSION=$(echo "$FIREWALL_RESPONSE" | head -n -1 | tr -d '[:space:]')
     
-    if [ -n "$FIREWALL_REPO_VERSION" ]; then
+    if [ -n "$FIREWALL_REPO_VERSION" ] && [ "$FIREWALL_HTTP_CODE" = "200" ]; then
         log_message "Repository Firewall version: $FIREWALL_REPO_VERSION"
         
         if version_greater "$FIREWALL_REPO_VERSION" "$FIREWALL_CURRENT_VERSION"; then
@@ -371,7 +335,7 @@ if [ -n "$FIREWALL_CURRENT_VERSION" ]; then
                 
                 if [ $? -eq 0 ]; then
                     # Update database with new firewall version in the firewall_version column
-                    sqlite3 "$DB_PATH" "UPDATE settings SET firewall_version = $FIREWALL_REPO_VERSION WHERE key='system_version';" 2>&1 >> "$LOG_FILE"
+                    sqlite3 "$DB_PATH" "UPDATE settings SET firewall_version = '$FIREWALL_REPO_VERSION' WHERE key='system_version';" 2>&1 >> "$LOG_FILE"
                     log_message "Firewall Service updated successfully to version $FIREWALL_REPO_VERSION"
                 else
                     log_message "WARNING: Firewall Service installation failed"
@@ -399,10 +363,12 @@ STARTUP_CURRENT_VERSION=$(sqlite3 "$DB_PATH" "SELECT startup_version FROM settin
 if [ -n "$STARTUP_CURRENT_VERSION" ]; then
     log_message "Current Startup version: $STARTUP_CURRENT_VERSION"
     
-    # Fetch Startup version from GitHub
-    STARTUP_REPO_VERSION=$(curl -s -H "Cache-Control: no-cache" "https://raw.githubusercontent.com/lyncsolutionsph/startup/main/version.txt?$(date +%s)" | tr -d '[:space:]')
+    # Fetch Startup version from GitHub with HTTP status check
+    STARTUP_RESPONSE=$(curl -s -w "\n%{http_code}" -H "Cache-Control: no-cache" "https://raw.githubusercontent.com/lyncsolutionsph/startup/main/version.txt?$(date +%s)" 2>/dev/null)
+    STARTUP_HTTP_CODE=$(echo "$STARTUP_RESPONSE" | tail -n 1)
+    STARTUP_REPO_VERSION=$(echo "$STARTUP_RESPONSE" | head -n -1 | tr -d '[:space:]')
     
-    if [ -n "$STARTUP_REPO_VERSION" ]; then
+    if [ -n "$STARTUP_REPO_VERSION" ] && [ "$STARTUP_HTTP_CODE" = "200" ]; then
         log_message "Repository Startup version: $STARTUP_REPO_VERSION"
         
         if version_greater "$STARTUP_REPO_VERSION" "$STARTUP_CURRENT_VERSION"; then
@@ -417,7 +383,7 @@ if [ -n "$STARTUP_CURRENT_VERSION" ]; then
                 
                 if [ $? -eq 0 ]; then
                     # Update database with new startup version in the startup_version column
-                    sqlite3 "$DB_PATH" "UPDATE settings SET startup_version = $STARTUP_REPO_VERSION WHERE key='system_version';" 2>&1 >> "$LOG_FILE"
+                    sqlite3 "$DB_PATH" "UPDATE settings SET startup_version = '$STARTUP_REPO_VERSION' WHERE key='system_version';" 2>&1 >> "$LOG_FILE"
                     log_message "Startup Service updated successfully to version $STARTUP_REPO_VERSION"
                 else
                     log_message "WARNING: Startup Service installation failed"
@@ -436,3 +402,9 @@ else
 fi
 
 log_message "Version check completed."
+
+# Reboot system if any updates were performed
+if [ ${#UPDATES_AVAILABLE[@]} -gt 0 ]; then
+    log_message "Updates completed. Rebooting system..."
+    sudo reboot now
+fi
