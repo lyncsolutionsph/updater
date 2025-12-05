@@ -86,8 +86,12 @@ check_all_updates() {
     
     # Check Router version (read from router_version column)
     local ROUTER_CURRENT=$(sqlite3 "$DB_PATH" "SELECT router_version FROM settings WHERE key='system_version' LIMIT 1;" 2>/dev/null)
-    local ROUTER_REPO=$(curl -s -H "Cache-Control: no-cache" "https://raw.githubusercontent.com/lyncsolutionsph/router0/main/version.txt?$(date +%s)" 2>/dev/null | tr -d '[:space:]')
-    if [ -n "$ROUTER_CURRENT" ] && [ -n "$ROUTER_REPO" ]; then
+    local ROUTER_REPO=$(curl -s -w "%{http_code}" -H "Cache-Control: no-cache" "https://raw.githubusercontent.com/lyncsolutionsph/router/main/version.txt?$(date +%s)" 2>/dev/null)
+    local HTTP_CODE="${ROUTER_REPO: -3}"
+    ROUTER_REPO="${ROUTER_REPO:0:-3}"
+    ROUTER_REPO=$(echo "$ROUTER_REPO" | tr -d '[:space:]')
+    
+    if [ -n "$ROUTER_CURRENT" ] && [ -n "$ROUTER_REPO" ] && [ "$HTTP_CODE" = "200" ]; then
         if version_greater "$ROUTER_REPO" "$ROUTER_CURRENT"; then
             UPDATES_AVAILABLE+=("Router: $ROUTER_CURRENT → $ROUTER_REPO")
         fi
@@ -95,8 +99,12 @@ check_all_updates() {
     
     # Check Firewall version (read from firewall_version column)
     local FIREWALL_CURRENT=$(sqlite3 "$DB_PATH" "SELECT firewall_version FROM settings WHERE key='system_version' LIMIT 1;" 2>/dev/null)
-    local FIREWALL_REPO=$(curl -s -H "Cache-Control: no-cache" "https://raw.githubusercontent.com/lyncsolutionsph/firewall/main/version.txt?$(date +%s)" 2>/dev/null | tr -d '[:space:]')
-    if [ -n "$FIREWALL_CURRENT" ] && [ -n "$FIREWALL_REPO" ]; then
+    local FIREWALL_REPO=$(curl -s -w "%{http_code}" -H "Cache-Control: no-cache" "https://raw.githubusercontent.com/lyncsolutionsph/firewall/main/version.txt?$(date +%s)" 2>/dev/null)
+    local HTTP_CODE="${FIREWALL_REPO: -3}"
+    FIREWALL_REPO="${FIREWALL_REPO:0:-3}"
+    FIREWALL_REPO=$(echo "$FIREWALL_REPO" | tr -d '[:space:]')
+    
+    if [ -n "$FIREWALL_CURRENT" ] && [ -n "$FIREWALL_REPO" ] && [ "$HTTP_CODE" = "200" ]; then
         if version_greater "$FIREWALL_REPO" "$FIREWALL_CURRENT"; then
             UPDATES_AVAILABLE+=("Firewall: $FIREWALL_CURRENT → $FIREWALL_REPO")
         fi
@@ -104,8 +112,12 @@ check_all_updates() {
     
     # Check Startup version (read from startup_version column)
     local STARTUP_CURRENT=$(sqlite3 "$DB_PATH" "SELECT startup_version FROM settings WHERE key='system_version' LIMIT 1;" 2>/dev/null)
-    local STARTUP_REPO=$(curl -s -H "Cache-Control: no-cache" "https://raw.githubusercontent.com/lyncsolutionsph/startup/main/version.txt?$(date +%s)" 2>/dev/null | tr -d '[:space:]')
-    if [ -n "$STARTUP_CURRENT" ] && [ -n "$STARTUP_REPO" ]; then
+    local STARTUP_REPO=$(curl -s -w "%{http_code}" -H "Cache-Control: no-cache" "https://raw.githubusercontent.com/lyncsolutionsph/startup/main/version.txt?$(date +%s)" 2>/dev/null)
+    local HTTP_CODE="${STARTUP_REPO: -3}"
+    STARTUP_REPO="${STARTUP_REPO:0:-3}"
+    STARTUP_REPO=$(echo "$STARTUP_REPO" | tr -d '[:space:]')
+    
+    if [ -n "$STARTUP_CURRENT" ] && [ -n "$STARTUP_REPO" ] && [ "$HTTP_CODE" = "200" ]; then
         if version_greater "$STARTUP_REPO" "$STARTUP_CURRENT"; then
             UPDATES_AVAILABLE+=("Startup: $STARTUP_CURRENT → $STARTUP_REPO")
         fi
@@ -305,7 +317,7 @@ if [ -n "$ROUTER_CURRENT_VERSION" ]; then
             log_message "Updating Router Service to version $ROUTER_REPO_VERSION..."
             
             cd "$TEMP_DIR" || mkdir -p "$TEMP_DIR" && cd "$TEMP_DIR"
-            git clone --depth 1 https://github.com/lyncsolutionsph/router0 router 2>&1 >> "$LOG_FILE"
+            git clone --depth 1 https://github.com/lyncsolutionsph/router router 2>&1 >> "$LOG_FILE"
             
             if [ $? -eq 0 ] && [ -d "$TEMP_DIR/router" ]; then
                 cd "$TEMP_DIR/router"
