@@ -84,8 +84,8 @@ check_all_updates() {
         UPDATES_AVAILABLE+=("UI: $CURRENT_VERSION → $REPO_VERSION")
     fi
     
-    # Check Router version
-    local ROUTER_CURRENT=$(sqlite3 "$DB_PATH" "SELECT version FROM settings WHERE key='router_version' LIMIT 1;" 2>/dev/null)
+    # Check Router version (read from router_version column)
+    local ROUTER_CURRENT=$(sqlite3 "$DB_PATH" "SELECT router_version FROM settings WHERE key='system_version' LIMIT 1;" 2>/dev/null)
     local ROUTER_REPO=$(curl -s -H "Cache-Control: no-cache" "https://raw.githubusercontent.com/lyncsolutionsph/router0/main/version.txt?$(date +%s)" 2>/dev/null | tr -d '[:space:]')
     if [ -n "$ROUTER_CURRENT" ] && [ -n "$ROUTER_REPO" ]; then
         if version_greater "$ROUTER_REPO" "$ROUTER_CURRENT"; then
@@ -93,8 +93,8 @@ check_all_updates() {
         fi
     fi
     
-    # Check Firewall version
-    local FIREWALL_CURRENT=$(sqlite3 "$DB_PATH" "SELECT version FROM settings WHERE key='firewall_version' LIMIT 1;" 2>/dev/null)
+    # Check Firewall version (read from firewall_version column)
+    local FIREWALL_CURRENT=$(sqlite3 "$DB_PATH" "SELECT firewall_version FROM settings WHERE key='system_version' LIMIT 1;" 2>/dev/null)
     local FIREWALL_REPO=$(curl -s -H "Cache-Control: no-cache" "https://raw.githubusercontent.com/lyncsolutionsph/firewall/main/version.txt?$(date +%s)" 2>/dev/null | tr -d '[:space:]')
     if [ -n "$FIREWALL_CURRENT" ] && [ -n "$FIREWALL_REPO" ]; then
         if version_greater "$FIREWALL_REPO" "$FIREWALL_CURRENT"; then
@@ -102,8 +102,8 @@ check_all_updates() {
         fi
     fi
     
-    # Check Startup version
-    local STARTUP_CURRENT=$(sqlite3 "$DB_PATH" "SELECT version FROM settings WHERE key='startup_version' LIMIT 1;" 2>/dev/null)
+    # Check Startup version (read from startup_version column)
+    local STARTUP_CURRENT=$(sqlite3 "$DB_PATH" "SELECT startup_version FROM settings WHERE key='system_version' LIMIT 1;" 2>/dev/null)
     local STARTUP_REPO=$(curl -s -H "Cache-Control: no-cache" "https://raw.githubusercontent.com/lyncsolutionsph/startup/main/version.txt?$(date +%s)" 2>/dev/null | tr -d '[:space:]')
     if [ -n "$STARTUP_CURRENT" ] && [ -n "$STARTUP_REPO" ]; then
         if version_greater "$STARTUP_REPO" "$STARTUP_CURRENT"; then
@@ -290,7 +290,7 @@ fi
 # ============================================
 log_message "Checking Router Service version..."
 
-ROUTER_CURRENT_VERSION=$(sqlite3 "$DB_PATH" "SELECT version FROM settings WHERE key='router_version' LIMIT 1;" 2>/dev/null)
+ROUTER_CURRENT_VERSION=$(sqlite3 "$DB_PATH" "SELECT router_version FROM settings WHERE key='system_version' LIMIT 1;" 2>/dev/null)
 
 if [ -n "$ROUTER_CURRENT_VERSION" ]; then
     log_message "Current Router version: $ROUTER_CURRENT_VERSION"
@@ -312,8 +312,8 @@ if [ -n "$ROUTER_CURRENT_VERSION" ]; then
                 sudo bash install.sh 2>&1 >> "$LOG_FILE"
                 
                 if [ $? -eq 0 ]; then
-                    # Update database with new router version
-                    sqlite3 "$DB_PATH" "UPDATE settings SET value = 'Router Version $ROUTER_REPO_VERSION', version = $ROUTER_REPO_VERSION WHERE key='router_version';" 2>&1 >> "$LOG_FILE"
+                    # Update database with new router version in the router_version column
+                    sqlite3 "$DB_PATH" "UPDATE settings SET router_version = $ROUTER_REPO_VERSION WHERE key='system_version';" 2>&1 >> "$LOG_FILE"
                     log_message "Router Service updated successfully to version $ROUTER_REPO_VERSION"
                 else
                     log_message "WARNING: Router Service installation failed"
@@ -336,7 +336,7 @@ fi
 # ============================================
 log_message "Checking Firewall Service version..."
 
-FIREWALL_CURRENT_VERSION=$(sqlite3 "$DB_PATH" "SELECT version FROM settings WHERE key='firewall_version' LIMIT 1;" 2>/dev/null)
+FIREWALL_CURRENT_VERSION=$(sqlite3 "$DB_PATH" "SELECT firewall_version FROM settings WHERE key='system_version' LIMIT 1;" 2>/dev/null)
 
 if [ -n "$FIREWALL_CURRENT_VERSION" ]; then
     log_message "Current Firewall version: $FIREWALL_CURRENT_VERSION"
@@ -358,8 +358,8 @@ if [ -n "$FIREWALL_CURRENT_VERSION" ]; then
                 sudo bash install.sh 2>&1 >> "$LOG_FILE"
                 
                 if [ $? -eq 0 ]; then
-                    # Update database with new firewall version
-                    sqlite3 "$DB_PATH" "UPDATE settings SET value = 'Firewall Version $FIREWALL_REPO_VERSION', version = $FIREWALL_REPO_VERSION WHERE key='firewall_version';" 2>&1 >> "$LOG_FILE"
+                    # Update database with new firewall version in the firewall_version column
+                    sqlite3 "$DB_PATH" "UPDATE settings SET firewall_version = $FIREWALL_REPO_VERSION WHERE key='system_version';" 2>&1 >> "$LOG_FILE"
                     log_message "Firewall Service updated successfully to version $FIREWALL_REPO_VERSION"
                 else
                     log_message "WARNING: Firewall Service installation failed"
@@ -382,7 +382,7 @@ fi
 # ============================================
 log_message "Checking Startup Service version..."
 
-STARTUP_CURRENT_VERSION=$(sqlite3 "$DB_PATH" "SELECT version FROM settings WHERE key='startup_version' LIMIT 1;" 2>/dev/null)
+STARTUP_CURRENT_VERSION=$(sqlite3 "$DB_PATH" "SELECT startup_version FROM settings WHERE key='system_version' LIMIT 1;" 2>/dev/null)
 
 if [ -n "$STARTUP_CURRENT_VERSION" ]; then
     log_message "Current Startup version: $STARTUP_CURRENT_VERSION"
@@ -404,8 +404,8 @@ if [ -n "$STARTUP_CURRENT_VERSION" ]; then
                 sudo bash install.sh 2>&1 >> "$LOG_FILE"
                 
                 if [ $? -eq 0 ]; then
-                    # Update database with new startup version
-                    sqlite3 "$DB_PATH" "UPDATE settings SET value = 'Startup Version $STARTUP_REPO_VERSION', version = $STARTUP_REPO_VERSION WHERE key='startup_version';" 2>&1 >> "$LOG_FILE"
+                    # Update database with new startup version in the startup_version column
+                    sqlite3 "$DB_PATH" "UPDATE settings SET startup_version = $STARTUP_REPO_VERSION WHERE key='system_version';" 2>&1 >> "$LOG_FILE"
                     log_message "Startup Service updated successfully to version $STARTUP_REPO_VERSION"
                 else
                     log_message "WARNING: Startup Service installation failed"
