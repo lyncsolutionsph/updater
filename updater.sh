@@ -75,45 +75,47 @@ version_greater() {
     test "$(printf '%s\n' "$@" | sort -V | head -n 1)" != "$1"
 }
 
-# Check all service versions first
-ROUTER_CURRENT_VERSION=$(sqlite3 "$DB_PATH" "SELECT version FROM settings WHERE key='router_version' LIMIT 1;" 2>/dev/null)
-ROUTER_REPO_VERSION=$(curl -s -H "Cache-Control: no-cache" "https://raw.githubusercontent.com/lyncsolutionsph/router0/main/version.txt?$(date +%s)" | tr -d '[:space:]')
-
-FIREWALL_CURRENT_VERSION=$(sqlite3 "$DB_PATH" "SELECT version FROM settings WHERE key='firewall_version' LIMIT 1;" 2>/dev/null)
-FIREWALL_REPO_VERSION=$(curl -s -H "Cache-Control: no-cache" "https://raw.githubusercontent.com/lyncsolutionsph/firewall/main/version.txt?$(date +%s)" | tr -d '[:space:]')
-
-STARTUP_CURRENT_VERSION=$(sqlite3 "$DB_PATH" "SELECT version FROM settings WHERE key='startup_version' LIMIT 1;" 2>/dev/null)
-STARTUP_REPO_VERSION=$(curl -s -H "Cache-Control: no-cache" "https://raw.githubusercontent.com/lyncsolutionsph/startup/main/version.txt?$(date +%s)" | tr -d '[:space:]')
-
-# Build update list
-UPDATES_AVAILABLE=()
-UI_UPDATE=false
-
-# Check if repository version is higher than current version
-if version_greater "$REPO_VERSION" "$CURRENT_VERSION"; then
-    UI_UPDATE=true
-    UPDATES_AVAILABLE+=("UI: $CURRENT_VERSION → $REPO_VERSION")
-fi
-
-if [ -n "$ROUTER_CURRENT_VERSION" ] && [ -n "$ROUTER_REPO_VERSION" ]; then
-    if version_greater "$ROUTER_REPO_VERSION" "$ROUTER_CURRENT_VERSION"; then
-        UPDATES_AVAILABLE+=("Router: $ROUTER_CURRENT_VERSION → $ROUTER_REPO_VERSION")
+# Function to check all service versions and build update list
+check_all_updates() {
+    UPDATES_AVAILABLE=()
+    
+    # Check UI version
+    if version_greater "$REPO_VERSION" "$CURRENT_VERSION"; then
+        UPDATES_AVAILABLE+=("UI: $CURRENT_VERSION → $REPO_VERSION")
     fi
-fi
-
-if [ -n "$FIREWALL_CURRENT_VERSION" ] && [ -n "$FIREWALL_REPO_VERSION" ]; then
-    if version_greater "$FIREWALL_REPO_VERSION" "$FIREWALL_CURRENT_VERSION"; then
-        UPDATES_AVAILABLE+=("Firewall: $FIREWALL_CURRENT_VERSION → $FIREWALL_REPO_VERSION")
+    
+    # Check Router version
+    local ROUTER_CURRENT=$(sqlite3 "$DB_PATH" "SELECT version FROM settings WHERE key='router_version' LIMIT 1;" 2>/dev/null)
+    local ROUTER_REPO=$(curl -s -H "Cache-Control: no-cache" "https://raw.githubusercontent.com/lyncsolutionsph/router0/main/version.txt?$(date +%s)" 2>/dev/null | tr -d '[:space:]')
+    if [ -n "$ROUTER_CURRENT" ] && [ -n "$ROUTER_REPO" ]; then
+        if version_greater "$ROUTER_REPO" "$ROUTER_CURRENT"; then
+            UPDATES_AVAILABLE+=("Router: $ROUTER_CURRENT → $ROUTER_REPO")
+        fi
     fi
-fi
-
-if [ -n "$STARTUP_CURRENT_VERSION" ] && [ -n "$STARTUP_REPO_VERSION" ]; then
-    if version_greater "$STARTUP_REPO_VERSION" "$STARTUP_CURRENT_VERSION"; then
-        UPDATES_AVAILABLE+=("Startup: $STARTUP_CURRENT_VERSION → $STARTUP_REPO_VERSION")
+    
+    # Check Firewall version
+    local FIREWALL_CURRENT=$(sqlite3 "$DB_PATH" "SELECT version FROM settings WHERE key='firewall_version' LIMIT 1;" 2>/dev/null)
+    local FIREWALL_REPO=$(curl -s -H "Cache-Control: no-cache" "https://raw.githubusercontent.com/lyncsolutionsph/firewall/main/version.txt?$(date +%s)" 2>/dev/null | tr -d '[:space:]')
+    if [ -n "$FIREWALL_CURRENT" ] && [ -n "$FIREWALL_REPO" ]; then
+        if version_greater "$FIREWALL_REPO" "$FIREWALL_CURRENT"; then
+            UPDATES_AVAILABLE+=("Firewall: $FIREWALL_CURRENT → $FIREWALL_REPO")
+        fi
     fi
-fi
+    
+    # Check Startup version
+    local STARTUP_CURRENT=$(sqlite3 "$DB_PATH" "SELECT version FROM settings WHERE key='startup_version' LIMIT 1;" 2>/dev/null)
+    local STARTUP_REPO=$(curl -s -H "Cache-Control: no-cache" "https://raw.githubusercontent.com/lyncsolutionsph/startup/main/version.txt?$(date +%s)" 2>/dev/null | tr -d '[:space:]')
+    if [ -n "$STARTUP_CURRENT" ] && [ -n "$STARTUP_REPO" ]; then
+        if version_greater "$STARTUP_REPO" "$STARTUP_CURRENT"; then
+            UPDATES_AVAILABLE+=("Startup: $STARTUP_CURRENT → $STARTUP_REPO")
+        fi
+    fi
+}
 
-# If any updates are available, show them
+# Check all updates
+check_all_updates
+
+# If any updates are available, show them and prompt
 if [ ${#UPDATES_AVAILABLE[@]} -gt 0 ]; then
     log_message "Updates available: ${UPDATES_AVAILABLE[*]}"
     
@@ -139,7 +141,7 @@ if [ ${#UPDATES_AVAILABLE[@]} -gt 0 ]; then
 fi
 
 # Check if UI update is needed
-if [ "$UI_UPDATE" = true ]; then
+if version_greater "$REPO_VERSION" "$CURRENT_VERSION"; then
     log_message "New version available: $REPO_VERSION (current: $CURRENT_VERSION)"
     
     log_message "Starting update process..."
