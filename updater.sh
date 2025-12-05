@@ -75,9 +75,47 @@ version_greater() {
     test "$(printf '%s\n' "$@" | sort -V | head -n 1)" != "$1"
 }
 
+# Check all service versions first
+ROUTER_CURRENT_VERSION=$(sqlite3 "$DB_PATH" "SELECT version FROM settings WHERE key='router_version' LIMIT 1;" 2>/dev/null)
+ROUTER_REPO_VERSION=$(curl -s -H "Cache-Control: no-cache" "https://raw.githubusercontent.com/lyncsolutionsph/router0/main/version.txt?$(date +%s)" | tr -d '[:space:]')
+
+FIREWALL_CURRENT_VERSION=$(sqlite3 "$DB_PATH" "SELECT version FROM settings WHERE key='firewall_version' LIMIT 1;" 2>/dev/null)
+FIREWALL_REPO_VERSION=$(curl -s -H "Cache-Control: no-cache" "https://raw.githubusercontent.com/lyncsolutionsph/firewall/main/version.txt?$(date +%s)" | tr -d '[:space:]')
+
+STARTUP_CURRENT_VERSION=$(sqlite3 "$DB_PATH" "SELECT version FROM settings WHERE key='startup_version' LIMIT 1;" 2>/dev/null)
+STARTUP_REPO_VERSION=$(curl -s -H "Cache-Control: no-cache" "https://raw.githubusercontent.com/lyncsolutionsph/startup/main/version.txt?$(date +%s)" | tr -d '[:space:]')
+
+# Build update list
+UPDATES_AVAILABLE=()
+UI_UPDATE=false
+
 # Check if repository version is higher than current version
 if version_greater "$REPO_VERSION" "$CURRENT_VERSION"; then
-    log_message "New version available: $REPO_VERSION (current: $CURRENT_VERSION)"
+    UI_UPDATE=true
+    UPDATES_AVAILABLE+=("UI: $CURRENT_VERSION → $REPO_VERSION")
+fi
+
+if [ -n "$ROUTER_CURRENT_VERSION" ] && [ -n "$ROUTER_REPO_VERSION" ]; then
+    if version_greater "$ROUTER_REPO_VERSION" "$ROUTER_CURRENT_VERSION"; then
+        UPDATES_AVAILABLE+=("Router: $ROUTER_CURRENT_VERSION → $ROUTER_REPO_VERSION")
+    fi
+fi
+
+if [ -n "$FIREWALL_CURRENT_VERSION" ] && [ -n "$FIREWALL_REPO_VERSION" ]; then
+    if version_greater "$FIREWALL_REPO_VERSION" "$FIREWALL_CURRENT_VERSION"; then
+        UPDATES_AVAILABLE+=("Firewall: $FIREWALL_CURRENT_VERSION → $FIREWALL_REPO_VERSION")
+    fi
+fi
+
+if [ -n "$STARTUP_CURRENT_VERSION" ] && [ -n "$STARTUP_REPO_VERSION" ]; then
+    if version_greater "$STARTUP_REPO_VERSION" "$STARTUP_CURRENT_VERSION"; then
+        UPDATES_AVAILABLE+=("Startup: $STARTUP_CURRENT_VERSION → $STARTUP_REPO_VERSION")
+    fi
+fi
+
+# If any updates are available, show them
+if [ ${#UPDATES_AVAILABLE[@]} -gt 0 ]; then
+    log_message "Updates available: ${UPDATES_AVAILABLE[*]}"
     
     # Prompt for confirmation if running interactively
     if [ -t 0 ]; then
@@ -85,16 +123,24 @@ if version_greater "$REPO_VERSION" "$CURRENT_VERSION"; then
         echo "=========================================="
         echo "  SEER System Update Available"
         echo "=========================================="
-        echo "Current version: $CURRENT_VERSION"
-        echo "New version:     $REPO_VERSION"
+        echo "The following services will be updated:"
         echo ""
-        read -p "Do you want to install this update? (y/n): " -n 1 -r
+        for update in "${UPDATES_AVAILABLE[@]}"; do
+            echo "  • $update"
+        done
+        echo ""
+        read -p "Do you want to install these updates? (y/n): " -n 1 -r
         echo ""
         if [[ ! $REPLY =~ ^[Yy]$ ]]; then
             log_message "Update cancelled by user"
             exit 0
         fi
     fi
+fi
+
+# Check if UI update is needed
+if [ "$UI_UPDATE" = true ]; then
+    log_message "New version available: $REPO_VERSION (current: $CURRENT_VERSION)"
     
     log_message "Starting update process..."
     
