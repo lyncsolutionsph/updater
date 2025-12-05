@@ -45,7 +45,7 @@ trap cleanup EXIT
 log_message "Starting version check..."
 
 # Get current version from database
-CURRENT_VERSION=$(sqlite3 "$DB_PATH" "SELECT value FROM settings WHERE key='version' LIMIT 1;" 2>/dev/null)
+CURRENT_VERSION=$(sqlite3 "$DB_PATH" "SELECT version FROM settings WHERE key='system_version' LIMIT 1;" 2>/dev/null)
 
 # If the above query fails, try alternative column name
 if [ -z "$CURRENT_VERSION" ]; then
@@ -179,27 +179,40 @@ if version_greater "$REPO_VERSION" "$CURRENT_VERSION"; then
     chown -R admin:admin "$TARGET_DIR/.node-red"
     log_message "Permissions set for .node-red"
     
+    # Update database path after restoration
+    DB_PATH="$TARGET_DIR/.node-red/seer_database/seer.db"
+    
     # Update database with new version
     log_message "Updating database version to $REPO_VERSION..."
     
-    # Try updating with key-value structure first
-    sqlite3 "$DB_PATH" "UPDATE settings SET value = '$REPO_VERSION' WHERE key='version';" 2>&1 >> "$LOG_FILE"
+    # Log current database state for debugging
+    CURRENT_DB_STATE=$(sqlite3 "$DB_PATH" "SELECT key, value, version FROM settings;" 2>&1)
+    log_message "Current database state: $CURRENT_DB_STATE"
     
-    # If that fails, try simple column structure
-    if [ $? -ne 0 ]; then
-        sqlite3 "$DB_PATH" "UPDATE settings SET version = '$REPO_VERSION';" 2>&1 >> "$LOG_FILE"
-        if [ $? -ne 0 ]; then
-            log_message "ERROR: Failed to update database version"
-            sudo systemctl start nodered
-            exit 1
-        fi
+    # Update both value and version columns where key='system_version'
+    ROWS_AFFECTED=$(sqlite3 "$DB_PATH" "UPDATE settings SET value = 'SEER Version $REPO_VERSION', version = $REPO_VERSION WHERE key='system_version'; SELECT changes();" 2>&1 | tail -n 1)
+    log_message "Rows affected by version update: $ROWS_AFFECTED"
+    
+    # If no rows were affected, something is wrong
+    if [ "$ROWS_AFFECTED" = "0" ] || [ -z "$ROWS_AFFECTED" ]; then
+        log_message "ERROR: Failed to update database version (no rows affected). Check if key='system_version' exists."
+        sudo systemctl start nodered
+        exit 1
     fi
     
     # Verify the update
-    NEW_VERSION=$(sqlite3 "$DB_PATH" "SELECT value FROM settings WHERE key='version' LIMIT 1;" 2>/dev/null)
+    NEW_VERSION=$(sqlite3 "$DB_PATH" "SELECT version FROM settings WHERE key='system_version' LIMIT 1;" 2>/dev/null)
     if [ -z "$NEW_VERSION" ]; then
         NEW_VERSION=$(sqlite3 "$DB_PATH" "SELECT version FROM settings LIMIT 1;" 2>/dev/null)
     fi
+    
+    # Verify the version matches what we tried to set
+    if [ "$NEW_VERSION" != "$REPO_VERSION" ]; then
+        log_message "ERROR: Database version mismatch. Expected: $REPO_VERSION, Got: $NEW_VERSION"
+        sudo systemctl start nodered
+        exit 1
+    fi
+    
     log_message "Database version updated to: $NEW_VERSION"
     
     # Start Node-RED service
@@ -222,6 +235,144 @@ else
         log_message "Node-RED is not running, starting service..."
         sudo systemctl start nodered
     fi
+fi
+
+# ============================================
+# Check and update Router Service
+# ============================================
+log_message "Checking Router Service version..."
+
+ROUTER_CURRENT_VERSION=$(sqlite3 "$DB_PATH" "SELECT version FROM settings WHERE key='router_version' LIMIT 1;" 2>/dev/null)
+
+if [ -n "$ROUTER_CURRENT_VERSION" ]; then
+    log_message "Current Router version: $ROUTER_CURRENT_VERSION"
+    
+    # Fetch Router version from GitHub
+    ROUTER_REPO_VERSION=$(curl -s -H "Cache-Control: no-cache" "https://raw.githubusercontent.com/lyncsolutionsph/router0/main/version.txt?$(date +%s)" | tr -d '[:space:]')
+    
+    if [ -n "$ROUTER_REPO_VERSION" ]; then
+        log_message "Repository Router version: $ROUTER_REPO_VERSION"
+        
+        if version_greater "$ROUTER_REPO_VERSION" "$ROUTER_CURRENT_VERSION"; then
+            log_message "Updating Router Service to version $ROUTER_REPO_VERSION..."
+            
+            cd "$TEMP_DIR" || mkdir -p "$TEMP_DIR" && cd "$TEMP_DIR"
+            git clone --depth 1 https://github.com/lyncsolutionsph/router0 router 2>&1 >> "$LOG_FILE"
+            
+            if [ $? -eq 0 ] && [ -d "$TEMP_DIR/router" ]; then
+                cd "$TEMP_DIR/router"
+                sudo bash install.sh 2>&1 >> "$LOG_FILE"
+                
+                if [ $? -eq 0 ]; then
+                    # Update database with new router version
+                    sqlite3 "$DB_PATH" "UPDATE settings SET value = 'Router Version $ROUTER_REPO_VERSION', version = $ROUTER_REPO_VERSION WHERE key='router_version';" 2>&1 >> "$LOG_FILE"
+                    log_message "Router Service updated successfully to version $ROUTER_REPO_VERSION"
+                else
+                    log_message "WARNING: Router Service installation failed"
+                fi
+            else
+                log_message "WARNING: Failed to clone Router repository"
+            fi
+        else
+            log_message "Router Service is up to date (version: $ROUTER_CURRENT_VERSION)"
+        fi
+    else
+        log_message "WARNING: Could not fetch Router version from repository"
+    fi
+else
+    log_message "Router version not found in database, skipping Router update check"
+fi
+
+# ============================================
+# Check and update Firewall Service
+# ============================================
+log_message "Checking Firewall Service version..."
+
+FIREWALL_CURRENT_VERSION=$(sqlite3 "$DB_PATH" "SELECT version FROM settings WHERE key='firewall_version' LIMIT 1;" 2>/dev/null)
+
+if [ -n "$FIREWALL_CURRENT_VERSION" ]; then
+    log_message "Current Firewall version: $FIREWALL_CURRENT_VERSION"
+    
+    # Fetch Firewall version from GitHub
+    FIREWALL_REPO_VERSION=$(curl -s -H "Cache-Control: no-cache" "https://raw.githubusercontent.com/lyncsolutionsph/firewall/main/version.txt?$(date +%s)" | tr -d '[:space:]')
+    
+    if [ -n "$FIREWALL_REPO_VERSION" ]; then
+        log_message "Repository Firewall version: $FIREWALL_REPO_VERSION"
+        
+        if version_greater "$FIREWALL_REPO_VERSION" "$FIREWALL_CURRENT_VERSION"; then
+            log_message "Updating Firewall Service to version $FIREWALL_REPO_VERSION..."
+            
+            cd "$TEMP_DIR" || mkdir -p "$TEMP_DIR" && cd "$TEMP_DIR"
+            git clone --depth 1 https://github.com/lyncsolutionsph/firewall firewall 2>&1 >> "$LOG_FILE"
+            
+            if [ $? -eq 0 ] && [ -d "$TEMP_DIR/firewall" ]; then
+                cd "$TEMP_DIR/firewall"
+                sudo bash install.sh 2>&1 >> "$LOG_FILE"
+                
+                if [ $? -eq 0 ]; then
+                    # Update database with new firewall version
+                    sqlite3 "$DB_PATH" "UPDATE settings SET value = 'Firewall Version $FIREWALL_REPO_VERSION', version = $FIREWALL_REPO_VERSION WHERE key='firewall_version';" 2>&1 >> "$LOG_FILE"
+                    log_message "Firewall Service updated successfully to version $FIREWALL_REPO_VERSION"
+                else
+                    log_message "WARNING: Firewall Service installation failed"
+                fi
+            else
+                log_message "WARNING: Failed to clone Firewall repository"
+            fi
+        else
+            log_message "Firewall Service is up to date (version: $FIREWALL_CURRENT_VERSION)"
+        fi
+    else
+        log_message "WARNING: Could not fetch Firewall version from repository"
+    fi
+else
+    log_message "Firewall version not found in database, skipping Firewall update check"
+fi
+
+# ============================================
+# Check and update Startup Service
+# ============================================
+log_message "Checking Startup Service version..."
+
+STARTUP_CURRENT_VERSION=$(sqlite3 "$DB_PATH" "SELECT version FROM settings WHERE key='startup_version' LIMIT 1;" 2>/dev/null)
+
+if [ -n "$STARTUP_CURRENT_VERSION" ]; then
+    log_message "Current Startup version: $STARTUP_CURRENT_VERSION"
+    
+    # Fetch Startup version from GitHub
+    STARTUP_REPO_VERSION=$(curl -s -H "Cache-Control: no-cache" "https://raw.githubusercontent.com/lyncsolutionsph/startup/main/version.txt?$(date +%s)" | tr -d '[:space:]')
+    
+    if [ -n "$STARTUP_REPO_VERSION" ]; then
+        log_message "Repository Startup version: $STARTUP_REPO_VERSION"
+        
+        if version_greater "$STARTUP_REPO_VERSION" "$STARTUP_CURRENT_VERSION"; then
+            log_message "Updating Startup Service to version $STARTUP_REPO_VERSION..."
+            
+            cd "$TEMP_DIR" || mkdir -p "$TEMP_DIR" && cd "$TEMP_DIR"
+            git clone --depth 1 https://github.com/lyncsolutionsph/startup startup 2>&1 >> "$LOG_FILE"
+            
+            if [ $? -eq 0 ] && [ -d "$TEMP_DIR/startup" ]; then
+                cd "$TEMP_DIR/startup"
+                sudo bash install.sh 2>&1 >> "$LOG_FILE"
+                
+                if [ $? -eq 0 ]; then
+                    # Update database with new startup version
+                    sqlite3 "$DB_PATH" "UPDATE settings SET value = 'Startup Version $STARTUP_REPO_VERSION', version = $STARTUP_REPO_VERSION WHERE key='startup_version';" 2>&1 >> "$LOG_FILE"
+                    log_message "Startup Service updated successfully to version $STARTUP_REPO_VERSION"
+                else
+                    log_message "WARNING: Startup Service installation failed"
+                fi
+            else
+                log_message "WARNING: Failed to clone Startup repository"
+            fi
+        else
+            log_message "Startup Service is up to date (version: $STARTUP_CURRENT_VERSION)"
+        fi
+    else
+        log_message "WARNING: Could not fetch Startup version from repository"
+    fi
+else
+    log_message "Startup version not found in database, skipping Startup update check"
 fi
 
 log_message "Version check completed."
